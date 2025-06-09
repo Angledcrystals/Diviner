@@ -5,7 +5,7 @@ Advanced Image Pixel Divination System with G-S Alignment Data Support
 
 Author: Angledcrystals
 Date: 2025-06-09
-Time: 08:48:22 UTC
+Time: 11:31:24 UTC
 
 This tool can "divine" pixels using the same alignment data format
 as the G-S Divine Stereo Viewer, with full compatibility for
@@ -26,6 +26,8 @@ from scipy.spatial import cKDTree
 import time
 from datetime import datetime
 import json
+import sys
+import traceback
 
 class GSCompatibleDivinePixelTool:
     def __init__(self, root):
@@ -1019,8 +1021,8 @@ the full G-S compatible divine pixel experience!"""
         for step in range(int(max_trace_distance / step_size)):
             # Move backwards along flow
             if hole_y < height and hole_x < width:
-                current_x -= flow_dir_x * step_size
-                current_y -= flow_dir_y * step_size
+                current_x -= flow_dir_x[hole_y, hole_x] * step_size
+                current_y -= flow_dir_y[hole_y, hole_x] * step_size
             
             # Check bounds
             if current_x < 0 or current_x >= width-1 or current_y < 0 or current_y >= height-1:
@@ -1344,6 +1346,7 @@ the full G-S compatible divine pixel experience!"""
             
         except Exception as e:
             messagebox.showerror("Test Error", f"Test failed: {str(e)}")
+            traceback.print_exc()
 
     # === VISUALIZATION METHODS ===
     
@@ -1375,335 +1378,6 @@ the full G-S compatible divine pixel experience!"""
 
     def visualize_gs_coordinate_maps(self):
         """Visualize generated G-S coordinate maps."""
-        if self.gs_coordinate_map is None:
-            return
-            
-        self.fig.clear()
-        
-        # Create subplot layout
-        if 'g_theta' in self.gs_coordinate_map:
-            # Full G-S coordinate visualization
-            gs = self.fig.add_gridspec(2, 3, hspace=0.4, wspace=0.3)
-            
-            ax1 = self.fig.add_subplot(gs[0, 0])
-            im1 = ax1.imshow(self.gs_coordinate_map['g_theta'], cmap='hsv')
-            ax1.set_title("G_theta (degrees)")
-            ax1.axis('off')
-            self.fig.colorbar(im1, ax=ax1, fraction=0.046)
-            
-            ax2 = self.fig.add_subplot(gs[0, 1])
-            im2 = ax2.imshow(self.gs_coordinate_map['g_phi'], cmap='plasma')
-            ax2.set_title("G_phi (degrees)")
-            ax2.axis('off')
-            self.fig.colorbar(im2, ax=ax2, fraction=0.046)
-            
-            ax3 = self.fig.add_subplot(gs[0, 2])
-            im3 = ax3.imshow(self.gs_coordinate_map['s_x'], cmap='coolwarm')
-            ax3.set_title("S_x coordinates")
-            ax3.axis('off')
-            self.fig.colorbar(im3, ax=ax3, fraction=0.046)
-            
-            ax4 = self.fig.add_subplot(gs[1, 0])
-            im4 = ax4.imshow(self.gs_coordinate_map['s_y'], cmap='coolwarm')
-            ax4.set_title("S_y coordinates")
-            ax4.axis('off')
-            self.fig.colorbar(im4, ax=ax4, fraction=0.046)
-            
-            # Show alignment points if available
-            if self.gs_alignment_data is not None:
-                ax5 = self.fig.add_subplot(gs[1, 1:])
-                s_x_points = [a['S_x'] for a in self.gs_alignment_data]
-                s_y_points = [a['S_y'] for a in self.gs_alignment_data]
-                ax5.scatter(s_x_points, s_y_points, c='red', s=20, alpha=0.7)
-                ax5.set_xlabel("S_x")
-                ax5.set_ylabel("S_y")
-                ax5.set_title(f"G-S Alignment Points ({len(self.gs_alignment_data)})")
-                ax5.grid(True, alpha=0.3)
-            
-            source_text = "Generated from G-S alignment data" if self.gs_coordinate_map.get('alignment_source', False) else "Basic coordinate generation"
-            self.fig.suptitle(f"G-S Compatible Coordinate Maps - {source_text}", fontsize=14, weight='bold')
-        else:
-            # Basic S-coordinate visualization
-            ax1 = self.fig.add_subplot(121)
-            im1 = ax1.imshow(self.gs_coordinate_map['s_x'], cmap='coolwarm')
-            ax1.set_title("S_x coordinates")
-            ax1.axis('off')
-            self.fig.colorbar(im1, ax=ax1, fraction=0.046)
-            
-            ax2 = self.fig.add_subplot(122)
-            im2 = ax2.imshow(self.gs_coordinate_map['s_y'], cmap='coolwarm')
-            ax2.set_title("S_y coordinates")
-            ax2.axis('off')
-            self.fig.colorbar(im2, ax=ax2, fraction=0.046)
-            
-            self.fig.suptitle("Basic S-Coordinate Maps", fontsize=14, weight='bold')
-        
-        self.canvas.draw()
-
-    def visualize_results(self):
-        """Visualize divination results."""
-        if self.divined_image is None:
-            return
-            
-        self.fig.clear()
-        
-        if self.divine_outside_bounds.get():
-            # Show original and expanded result
-            gs = self.fig.add_gridspec(2, 2, hspace=0.3, wspace=0.2)
-            
-            ax1 = self.fig.add_subplot(gs[0, 0])
-            ax1.imshow(self.original_image)
-            ax1.set_title("Original Image")
-            ax1.axis('off')
-            
-            ax2 = self.fig.add_subplot(gs[0, 1])
-            ax2.imshow(self.divined_image)
-            ax2.set_title("🔮 G-S Divined Image")
-            ax2.axis('off')
-        
-        method_text = f"Method: {self.divination_method.get()}"
-        if self.gs_alignment_data is not None and self.use_gs_alignment_data.get():
-            method_text += f" • G-S Enhanced ({len(self.gs_alignment_data)} alignments)"
-        if self.divine_outside_bounds.get():
-            method_text += f" • Expanded: {self.edge_extension.get()}px"
-        
-        self.fig.suptitle(f"🔮 G-S Divine Pixel Results - {method_text}", 
-                         fontsize=14, weight='bold')
-        self.canvas.draw()
-
-    def gradient_synthesis_divination(self, image, mask):
-        """Divine pixels using gradient synthesis."""
-        if self.debug_mode.get():
-            print("🧮 Performing gradient synthesis divination...")
-        
-        result = image.copy()
-        height, width = result.shape[:2]
-        
-        # Calculate image gradients
-        gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        grad_x = cv2.Sobel(gray_image, cv2.CV_64F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray_image, cv2.CV_64F, 0, 1, ksize=3)
-        
-        # Process mask pixels
-        mask_coords = np.column_stack(np.where(mask))
-        divine_success = 0
-        
-        for mask_y, mask_x in mask_coords:
-            # Find gradient pattern in neighborhood
-            search_radius = self.divine_search_radius.get() // 2
-            y_min = max(0, mask_y - search_radius)
-            y_max = min(height, mask_y + search_radius + 1)
-            x_min = max(0, mask_x - search_radius)
-            x_max = min(width, mask_x + search_radius + 1)
-            
-            # Extract neighborhood
-            region_image = image[y_min:y_max, x_min:x_max]
-            region_mask = mask[y_min:y_max, x_min:x_max]
-            
-            # Find valid pixels in region
-            valid_region = ~region_mask
-            if np.any(valid_region):
-                # Use median of valid pixels as synthesis
-                valid_pixels = region_image[valid_region]
-                synthesized_pixel = np.median(valid_pixels, axis=0)
-                
-                result[mask_y, mask_x] = synthesized_pixel.astype(np.uint8)
-                divine_success += 1
-        
-        if self.debug_mode.get():
-            print(f"   Gradient synthesis success: {divine_success}/{len(mask_coords)} pixels")
-        
-        return result
-
-    def coordinate_based_synthesis(self, mask_y, mask_x, s_x, s_y, source_image, mask):
-        """Fallback coordinate-based synthesis."""
-        # Find nearby valid pixels
-        search_radius = self.divine_search_radius.get()
-        y_min = max(0, mask_y - search_radius)
-        y_max = min(s_x.shape[0], mask_y + search_radius + 1)
-        x_min = max(0, mask_x - search_radius)
-        x_max = min(s_x.shape[1], mask_x + search_radius + 1)
-        
-        # Extract neighborhood
-        region_mask = mask[y_min:y_max, x_min:x_max]
-        region_image = source_image[y_min:y_max, x_min:x_max]
-        
-        # Find valid pixels in region
-        valid_region = ~region_mask
-        if np.any(valid_region):
-            valid_pixels = region_image[valid_region]
-            return np.median(valid_pixels, axis=0).astype(np.uint8)
-        
-        return None
-
-    def apply_noise_reduction(self, image):
-        """Apply noise reduction to divined image."""
-        if self.debug_mode.get():
-            print("🧹 Applying noise reduction...")
-        
-        # Apply bilateral filter to reduce noise while preserving edges
-        return cv2.bilateralFilter(image, 5, 50, 50)
-
-    def coordinate_based_synthesis(self, mask_y, mask_x, s_x, s_y, source_image, mask):
-        """Fallback coordinate-based synthesis."""
-        # Find nearby valid pixels
-        search_radius = self.divine_search_radius.get()
-        y_min = max(0, mask_y - search_radius)
-        y_max = min(s_x.shape[0], mask_y + search_radius + 1)
-        x_min = max(0, mask_x - search_radius)
-        x_max = min(s_x.shape[1], mask_x + search_radius + 1)
-        
-        # Extract neighborhood
-        region_mask = mask[y_min:y_max, x_min:x_max]
-        region_image = source_image[y_min:y_max, x_min:x_max]
-        
-        # Find valid pixels in region
-        valid_region = ~region_mask
-        if np.any(valid_region):
-            valid_pixels = region_image[valid_region]
-            return np.median(valid_pixels, axis=0).astype(np.uint8)
-        
-        return None
-
-    def gradient_synthesis_divination(self, image, mask):
-        """Divine pixels using gradient synthesis."""
-        if self.debug_mode.get():
-            print("🧮 Performing gradient synthesis divination...")
-        
-        result = image.copy()
-        height, width = result.shape[:2]
-        
-        # Calculate image gradients
-        gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        grad_x = cv2.Sobel(gray_image, cv2.CV_64F, 1, 0, ksize=3)
-        grad_y = cv2.Sobel(gray_image, cv2.CV_64F, 0, 1, ksize=3)
-        
-        # Process mask pixels
-        mask_coords = np.column_stack(np.where(mask))
-        divine_success = 0
-        
-        for mask_y, mask_x in mask_coords:
-            # Find gradient pattern in neighborhood
-            search_radius = self.divine_search_radius.get() // 2
-            y_min = max(0, mask_y - search_radius)
-            y_max = min(height, mask_y + search_radius + 1)
-            x_min = max(0, mask_x - search_radius)
-            x_max = min(width, mask_x + search_radius + 1)
-            
-            # Extract neighborhood
-            region_image = image[y_min:y_max, x_min:x_max]
-            region_mask = mask[y_min:y_max, x_min:x_max]
-            
-            # Find valid pixels in region
-            valid_region = ~region_mask
-            if np.any(valid_region):
-                # Use median of valid pixels as synthesis
-                valid_pixels = region_image[valid_region]
-                synthesized_pixel = np.median(valid_pixels, axis=0)
-                
-                result[mask_y, mask_x] = synthesized_pixel.astype(np.uint8)
-                divine_success += 1
-        
-        if self.debug_mode.get():
-            print(f"   Gradient synthesis success: {divine_success}/{len(mask_coords)} pixels")
-        
-        return result
-
-    # === TEST AND VISUALIZATION METHODS ===
-    
-    def test_divine_process(self):
-        """Test divine process with artificial holes."""
-        if self.original_image is None:
-            messagebox.showwarning("No Data", "Load an image first")
-            return
-        
-        try:
-            print("🧪 Testing G-S compatible divine process...")
-            
-            # Create test image with artificial holes
-            test_image = self.original_image.copy()
-            height, width = test_image.shape[:2]
-            
-            # Create test mask (random holes)
-            test_mask = np.zeros((height, width), dtype=bool)
-            num_holes = 10
-            hole_size = 15
-            
-            for i in range(num_holes):
-                y_center = np.random.randint(hole_size, height - hole_size)
-                x_center = np.random.randint(hole_size, width - hole_size)
-                
-                test_mask[y_center-hole_size//2:y_center+hole_size//2,
-                         x_center-hole_size//2:x_center+hole_size//2] = True
-                test_image[y_center-hole_size//2:y_center+hole_size//2,
-                          x_center-hole_size//2:x_center+hole_size//2] = 0
-            
-            # Generate coordinate map for test
-            if self.gs_coordinate_map is None:
-                if self.gs_alignment_data is not None and self.use_gs_alignment_data.get():
-                    self.generate_gs_coordinate_maps()
-                else:
-                    self.generate_coordinate_map()
-            
-            # Apply divine process
-            method = self.divination_method.get()
-            if method == "gs_enhanced_divine":
-                divined_test = self.gs_enhanced_divine_process(test_image, test_mask)
-            elif method == "s_coordinate_flow":
-                divined_test = self.s_coordinate_flow_divination(test_image, test_mask)
-            elif method == "s_coordinate_similarity":
-                divined_test = self.s_coordinate_similarity_divination(test_image, test_mask)
-            elif method == "combined_divine":
-                divined_test = self.combined_divine_process(test_image, test_mask)
-            else:
-                divined_test = self.omniscient_divine_process(test_image, test_mask)
-            
-            # Visualize test results
-            self.visualize_test_results(self.original_image, test_image, divined_test, test_mask)
-            
-            print("🧪 G-S compatible divine process test completed")
-            
-        except Exception as e:
-            messagebox.showerror("Test Error", f"Test failed: {str(e)}")
-
-    # === VISUALIZATION METHODS ===
-    
-    def show_loaded_image(self):
-        """Show loaded image with G-S data info."""
-        if self.original_image is None:
-            return
-            
-        self.fig.clear()
-        ax = self.fig.add_subplot(111)
-        ax.imshow(self.original_image)
-        ax.set_title(f"Loaded Image ({self.original_image.shape[1]}x{self.original_image.shape[0]})")
-        ax.axis('off')
-        
-        info_text = ""
-        if self.gs_alignment_data is not None:
-            info_text += f"G-S Alignments: {len(self.gs_alignment_data)}\n"
-            
-            # Check for Hadit data
-            sample = self.gs_alignment_data[0]
-            if 'Hadit_theta' in sample and 'Hadit_phi' in sample:
-                info_text += "Hadit vectors: Available\n"
-            else:
-                info_text += "Hadit vectors: None\n"
-                
-        if self.mask_image is not None:
-            info_text += f"Mask: {np.sum(self.mask_image)} pixels\n"
-        if self.gs_coordinate_map is not None:
-            source = "G-S Data" if self.gs_coordinate_map.get('alignment_source', False) else "Generated"
-            info_text += f"Coordinates: {source}"
-        
-        if info_text:
-            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, verticalalignment='top',
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
-        
-        self.canvas.draw()
-
-    def visualize_gs_coordinate_maps(self):
-        """Visualize the generated G-S coordinate maps."""
         if self.gs_coordinate_map is None:
             return
             
@@ -1873,7 +1547,7 @@ the full G-S compatible divine pixel experience!"""
         if self.divined_image is not None:
             stats_text += f"Divined: {self.divined_image.shape}\n"
         
-        if self.gs_alignment_data is not None:
+        if self.gs_alignment_data is not None and len(self.gs_alignment_data) > 0:
             stats_text += f"G-S Alignments: {len(self.gs_alignment_data)}\n"
             if self.use_gs_alignment_data.get():
                 stats_text += "G-S Enhancement: ENABLED\n"
@@ -1901,7 +1575,7 @@ the full G-S compatible divine pixel experience!"""
             coord_source = "G-S Data" if self.gs_coordinate_map.get('alignment_source', False) else "Generated"
             stats_text += f"Coordinates: {coord_source}\n"
         
-        stats_text += f"Generated: {datetime.now().strftime('%H:%M:%S')}"
+        stats_text += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
         self.stats_label.config(text=stats_text)
 
@@ -1956,7 +1630,7 @@ the full G-S compatible divine pixel experience!"""
                     f.write(f"Divined Image: {self.divined_image.shape}\n")
                     f.write(f"Divination Method: {self.divination_method.get()}\n")
                     
-                    if self.gs_alignment_data is not None:
+                    if self.gs_alignment_data is not None and len(self.gs_alignment_data) > 0:
                         f.write(f"\nG-S ALIGNMENT DATA:\n")
                         f.write(f"Alignments Loaded: {len(self.gs_alignment_data)}\n")
                         f.write(f"G-S Enhancement: {'ENABLED' if self.use_gs_alignment_data.get() else 'DISABLED'}\n")
@@ -2042,7 +1716,7 @@ the full G-S compatible divine pixel experience!"""
                 export_data['edge_extension'] = self.edge_extension.get()
                 
                 # G-S alignment data info
-                if self.gs_alignment_data is not None:
+                if self.gs_alignment_data is not None and len(self.gs_alignment_data) > 0:
                     export_data['gs_alignment_count'] = len(self.gs_alignment_data)
                     export_data['use_gs_alignment_data'] = self.use_gs_alignment_data.get()
                     export_data['gs_coordinate_precision'] = self.gs_coordinate_precision.get()
@@ -2078,7 +1752,7 @@ def main():
     print("🔮 Starting G-S Compatible Divine Pixel Tool v1.2")
     print("Advanced Image Pixel Divination System with G-S Stereo Viewer Compatibility")
     print("Author: Angledcrystals")
-    print("Date: 2025-06-09 08:57:18 UTC")
+    print("Date: 2025-06-09 11:37:26 UTC")
     print("=" * 70)
     
     try:
@@ -2103,10 +1777,20 @@ def main():
         print("   • Complete metadata export with G-S alignment info")
         print("   • Identical coordinate generation methods as G-S Stereo Viewer")
         
+        # Add exception handling for better error reporting
+        def show_error(exc_type, exc_value, exc_traceback):
+            error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            print(f"❌ ERROR: {error_msg}")
+            messagebox.showerror("Divine Pixel Tool Error", 
+                              f"An error occurred:\n\n{exc_value}\n\nCheck console for details.")
+            
+        sys.excepthook = show_error
+        
         root.mainloop()
         
     except Exception as e:
         print(f"❌ Failed to start G-S Compatible Divine Pixel Tool: {e}")
+        traceback.print_exc()
         messagebox.showerror("Startup Error", f"Failed to start application: {str(e)}")
     
     print("🔮 G-S Compatible Divine Pixel Tool closed")
