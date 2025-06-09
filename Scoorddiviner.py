@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Divine Pixel Tool - G-S Compatible Version
-Advanced Image Pixel Divination System with G-S Alignment Data Support
+Divine Pixel Tool - G-S Compatible Version with Cascading Divination
+Advanced Image Pixel Divination System with G-S Alignment Data Support and Cascading Processing
 
 Author: Angledcrystals
 Date: 2025-06-09
-Time: 11:31:24 UTC
+Time: 12:22:02 UTC
 
 This tool can "divine" pixels using the same alignment data format
 as the G-S Divine Stereo Viewer, with full compatibility for
 S_x, S_y, G_theta, G_phi, and Hadit vector data.
+Now includes cascading divination where subsequent pixels are calculated
+using previously calculated pixels.
 """
 
 import tkinter as tk
@@ -28,11 +30,12 @@ from datetime import datetime
 import json
 import sys
 import traceback
+from collections import deque
 
 class GSCompatibleDivinePixelTool:
     def __init__(self, root):
         self.root = root
-        self.root.title("🔮 Divine Pixel Tool v1.2 - G-S Compatible")
+        self.root.title("🔮 Divine Pixel Tool v1.3 - G-S Compatible with Cascading")
         self.root.geometry("1600x1000")
         
         # Image data
@@ -63,6 +66,14 @@ class GSCompatibleDivinePixelTool:
         self.use_gradient_synthesis = tk.BooleanVar(value=True)
         self.divine_outside_bounds = tk.BooleanVar(value=True)
         
+        # Cascading divination parameters
+        self.enable_cascading = tk.BooleanVar(value=True)
+        self.cascading_order = tk.StringVar(value="nearest_first")
+        self.cascading_batch_size = tk.IntVar(value=1)
+        self.cascading_max_distance = tk.IntVar(value=50)
+        self.cascading_update_frequency = tk.StringVar(value="immediate")
+        self.show_cascading_progress = tk.BooleanVar(value=True)
+        
         # Processing options
         self.noise_reduction = tk.BooleanVar(value=True)
         self.preserve_structures = tk.BooleanVar(value=True)
@@ -72,6 +83,14 @@ class GSCompatibleDivinePixelTool:
         self.debug_mode = tk.BooleanVar(value=False)
         self.show_divination_map = tk.BooleanVar(value=False)
         self.show_confidence_map = tk.BooleanVar(value=False)
+        
+        # Cascading tracking
+        self.cascading_stats = {
+            'total_pixels': 0,
+            'processed_pixels': 0,
+            'successful_pixels': 0,
+            'cascade_generations': 0
+        }
         
         self.setup_gui()
         
@@ -95,7 +114,7 @@ class GSCompatibleDivinePixelTool:
         title_label = ttk.Label(parent, text="🔮 Divine Pixel Tool", font=("Arial", 16, "bold"))
         title_label.pack(pady=(0, 10))
         
-        subtitle_label = ttk.Label(parent, text="G-S Compatible Pixel Divination", font=("Arial", 10))
+        subtitle_label = ttk.Label(parent, text="G-S Compatible with Cascading Divination", font=("Arial", 10))
         subtitle_label.pack(pady=(0, 15))
         
         # Create scrollable frame
@@ -168,6 +187,41 @@ class GSCompatibleDivinePixelTool:
                                                    state="disabled")
         self.generate_gs_coords_button.pack(fill=tk.X, pady=5)
         
+        # Cascading Divination Section
+        cascade_frame = ttk.LabelFrame(parent, text="Step 2.5: Cascading Divination", padding=10)
+        cascade_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Checkbutton(cascade_frame, text="🌊 Enable Cascading Divination", 
+                       variable=self.enable_cascading).pack(anchor=tk.W, pady=2)
+        
+        ttk.Label(cascade_frame, text="Cascading Order:").pack(anchor=tk.W)
+        cascade_order_combo = ttk.Combobox(cascade_frame, textvariable=self.cascading_order,
+                                          values=["nearest_first", "flow_based", "coordinate_based", 
+                                                 "spiral_out", "random", "distance_weighted"])
+        cascade_order_combo.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(cascade_frame, text="Batch Size (pixels per update):").pack(anchor=tk.W)
+        batch_frame = ttk.Frame(cascade_frame)
+        batch_frame.pack(fill=tk.X, pady=2)
+        ttk.Scale(batch_frame, from_=1, to=20, variable=self.cascading_batch_size, 
+                 orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(batch_frame, textvariable=self.cascading_batch_size, width=8).pack(side=tk.RIGHT)
+        
+        ttk.Label(cascade_frame, text="Max Cascade Distance:").pack(anchor=tk.W)
+        distance_frame = ttk.Frame(cascade_frame)
+        distance_frame.pack(fill=tk.X, pady=2)
+        ttk.Scale(distance_frame, from_=10, to=100, variable=self.cascading_max_distance, 
+                 orient=tk.HORIZONTAL).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(distance_frame, textvariable=self.cascading_max_distance, width=8).pack(side=tk.RIGHT)
+        
+        ttk.Label(cascade_frame, text="Update Frequency:").pack(anchor=tk.W)
+        update_combo = ttk.Combobox(cascade_frame, textvariable=self.cascading_update_frequency,
+                                   values=["immediate", "batch", "generation"])
+        update_combo.pack(fill=tk.X, pady=2)
+        
+        ttk.Checkbutton(cascade_frame, text="📊 Show Cascading Progress", 
+                       variable=self.show_cascading_progress).pack(anchor=tk.W, pady=2)
+        
         # Divination Method Section
         method_frame = ttk.LabelFrame(parent, text="Step 3: Divination Method", padding=10)
         method_frame.pack(fill=tk.X, pady=(0, 10))
@@ -176,7 +230,8 @@ class GSCompatibleDivinePixelTool:
         method_combo = ttk.Combobox(method_frame, textvariable=self.divination_method,
                                    values=["s_coordinate_flow", "s_coordinate_similarity", 
                                           "geometric_extrapolation", "combined_divine", 
-                                          "gs_enhanced_divine", "omniscient_divine"])
+                                          "gs_enhanced_divine", "omniscient_divine",
+                                          "cascading_divine"])
         method_combo.pack(fill=tk.X, pady=2)
         
         # Divination Parameters (matching G-S viewer)
@@ -291,6 +346,16 @@ class GSCompatibleDivinePixelTool:
                                      foreground="orange")
         self.status_label.pack(pady=5)
         
+        # Cascading Progress
+        self.cascade_progress_var = tk.DoubleVar()
+        self.cascade_progress_bar = ttk.Progressbar(divine_frame, variable=self.cascade_progress_var, 
+                                                   maximum=100)
+        self.cascade_progress_bar.pack(fill=tk.X, pady=2)
+        
+        self.cascade_status_label = ttk.Label(divine_frame, text="", 
+                                             foreground="blue", font=("Arial", 8))
+        self.cascade_status_label.pack(pady=2)
+        
         # Export Section
         export_frame = ttk.LabelFrame(parent, text="Step 6: Export Results", padding=10)
         export_frame.pack(fill=tk.X, pady=(0, 10))
@@ -334,8 +399,9 @@ class GSCompatibleDivinePixelTool:
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         
-        welcome_text = """🔮 DIVINE PIXEL TOOL v1.2
+        welcome_text = """🔮 DIVINE PIXEL TOOL v1.3
 G-S Compatible Advanced Image Pixel Divination
+with Cascading Processing
 by Angledcrystals
 
 🌟 G-S Compatible Features:
@@ -346,41 +412,556 @@ by Angledcrystals
 • S-coordinate flow-based pixel divination
 • Geometric extrapolation beyond image bounds
 
-🧮 How G-S Integration Works:
-Your G-S alignment data provides precise coordinate
-relationships that enable superior pixel divination
-based on spherical geometry and S-coordinate flows.
+🌊 NEW: Cascading Divination Features:
+• Sequential pixel processing using previously calculated pixels
+• Multiple cascading orders: nearest-first, flow-based, coordinate-based
+• Configurable batch processing and update frequencies
+• Real-time cascading progress visualization
+• Enhanced continuity and pattern propagation
 
-📊 G-S Alignment Data Format:
-Expects the same JSON format as G-S Stereo Viewer:
-• S_x, S_y coordinates
-• G_theta, G_phi angles (degrees)  
-• Optional Hadit_theta, Hadit_phi vectors
+🧮 How Cascading Works:
+Each newly divined pixel immediately becomes available
+as source data for subsequent pixel calculations,
+creating a natural propagation effect that improves
+texture continuity and reduces artifacts.
 
-🌊 Enhanced S-Coordinate Flow:
-Uses your G-S alignment data to create precise
-S-coordinate maps for superior flow analysis
-and pixel prediction accuracy.
+📊 Cascading Order Options:
+• Nearest-First: Process pixels closest to known data first
+• Flow-Based: Follow S-coordinate flow directions
+• Coordinate-Based: Process by coordinate similarity
+• Spiral-Out: Expand from center in spiral pattern
+• Distance-Weighted: Prioritize by multiple distance metrics
 
-🔍 G-S Enhanced Similarity:
-Leverages G-coordinate relationships from your
-alignment data for better pattern matching
-and pixel synthesis.
-
-Load an image and G-S alignment data to unlock
-the full G-S compatible divine pixel experience!"""
+Load an image and configure cascading parameters to unlock
+the enhanced G-S compatible cascading divine pixel experience!"""
         
         ax.text(0.5, 0.5, welcome_text, ha='center', va='center', 
-                fontsize=10, transform=ax.transAxes, 
+                fontsize=9, transform=ax.transAxes, 
                 bbox=dict(boxstyle="round,pad=0.5", facecolor="lightcyan", alpha=0.9))
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis('off')
-        ax.set_title("G-S Compatible Divine Pixel Tool", fontsize=16, weight='bold')
+        ax.set_title("G-S Compatible Divine Pixel Tool with Cascading", fontsize=16, weight='bold')
         
         self.canvas.draw()
 
-    # === DATA LOADING METHODS ===
+    # === CASCADING DIVINATION CORE FUNCTIONS ===
+    
+    def cascading_divine_process(self, image, mask):
+        """Main cascading divination process where subsequent pixels use previously calculated pixels."""
+        if self.debug_mode.get():
+            print("🌊 Starting cascading divine process...")
+        
+        result = image.copy()
+        remaining_mask = mask.copy()
+        
+        # Initialize cascading statistics
+        self.cascading_stats = {
+            'total_pixels': np.sum(mask),
+            'processed_pixels': 0,
+            'successful_pixels': 0,
+            'cascade_generations': 0
+        }
+        
+        if self.cascading_stats['total_pixels'] == 0:
+            return result
+        
+        # Order pixels for cascading processing
+        ordered_coords = self.order_pixels_for_cascading(remaining_mask, self.cascading_order.get())
+        
+        if self.debug_mode.get():
+            print(f"   Ordered {len(ordered_coords)} pixels for cascading")
+        
+        batch_size = self.cascading_batch_size.get()
+        update_frequency = self.cascading_update_frequency.get()
+        
+        # Process pixels in cascading order
+        generation = 0
+        total_processed = 0
+        
+        while len(ordered_coords) > 0 and generation < 1000:  # Safety limit
+            generation += 1
+            batch_success = 0
+            batch_coords = []
+            
+            # Process current batch
+            for i in range(min(batch_size, len(ordered_coords))):
+                coord_idx, coord_y, coord_x = ordered_coords.pop(0)
+                
+                # Skip if pixel was already processed in this generation
+                if not remaining_mask[coord_y, coord_x]:
+                    continue
+                
+                # Divine this pixel using current state of the image
+                divined_pixel = self.divine_single_pixel_cascading(
+                    coord_y, coord_x, result, remaining_mask)
+                
+                if divined_pixel is not None:
+                    result[coord_y, coord_x] = divined_pixel
+                    remaining_mask[coord_y, coord_x] = False
+                    batch_success += 1
+                    batch_coords.append((coord_y, coord_x))
+                    self.cascading_stats['successful_pixels'] += 1
+                
+                self.cascading_stats['processed_pixels'] += 1
+                total_processed += 1
+                
+                # Update progress for immediate mode
+                if update_frequency == "immediate" and self.show_cascading_progress.get():
+                    progress = (self.cascading_stats['processed_pixels'] / 
+                              self.cascading_stats['total_pixels']) * 100
+                    self.cascade_progress_var.set(progress)
+                    self.cascade_status_label.config(
+                        text=f"Gen {generation}: {self.cascading_stats['successful_pixels']}/{self.cascading_stats['total_pixels']} pixels")
+                    self.root.update_idletasks()
+            
+            # Update coordinates for next generation if any pixels were successfully processed
+            if batch_success > 0 and len(ordered_coords) > 0:
+                # Re-order remaining pixels based on new state
+                if update_frequency == "batch" or (generation % 5 == 0):  # Re-order every few generations
+                    remaining_coords_mask = np.zeros_like(remaining_mask)
+                    for _, coord_y, coord_x in ordered_coords:
+                        if remaining_mask[coord_y, coord_x]:
+                            remaining_coords_mask[coord_y, coord_x] = True
+                    
+                    if np.any(remaining_coords_mask):
+                        ordered_coords = self.order_pixels_for_cascading(
+                            remaining_coords_mask, self.cascading_order.get())
+            
+            self.cascading_stats['cascade_generations'] = generation
+            
+            # Update progress for batch/generation modes
+            if update_frequency in ["batch", "generation"] and self.show_cascading_progress.get():
+                progress = (self.cascading_stats['processed_pixels'] / 
+                          self.cascading_stats['total_pixels']) * 100
+                self.cascade_progress_var.set(progress)
+                self.cascade_status_label.config(
+                    text=f"Gen {generation}: {self.cascading_stats['successful_pixels']}/{self.cascading_stats['total_pixels']} pixels")
+                self.root.update_idletasks()
+            
+            if self.debug_mode.get():
+                print(f"   Generation {generation}: {batch_success} pixels processed, {len(ordered_coords)} remaining")
+            
+            # Stop if no progress in this generation
+            if batch_success == 0:
+                break
+        
+        if self.debug_mode.get():
+            print(f"   Cascading complete: {self.cascading_stats['successful_pixels']}/{self.cascading_stats['total_pixels']} pixels successful in {generation} generations")
+        
+        return result
+
+    def order_pixels_for_cascading(self, mask, order_method):
+        """Order pixels based on cascading strategy."""
+        mask_coords = np.column_stack(np.where(mask))
+        if len(mask_coords) == 0:
+            return []
+        
+        height, width = mask.shape
+        
+        if order_method == "nearest_first":
+            return self.order_nearest_first(mask_coords, mask)
+        elif order_method == "flow_based":
+            return self.order_flow_based(mask_coords, mask)
+        elif order_method == "coordinate_based":
+            return self.order_coordinate_based(mask_coords, mask)
+        elif order_method == "spiral_out":
+            return self.order_spiral_out(mask_coords, mask)
+        elif order_method == "distance_weighted":
+            return self.order_distance_weighted(mask_coords, mask)
+        elif order_method == "random":
+            np.random.shuffle(mask_coords)
+            return [(i, y, x) for i, (y, x) in enumerate(mask_coords)]
+        else:
+            # Default to nearest first
+            return self.order_nearest_first(mask_coords, mask)
+
+    def order_nearest_first(self, mask_coords, mask):
+        """Order pixels by distance to nearest known (non-masked) pixel."""
+        height, width = mask.shape
+        
+        # Find all known pixels (not masked)
+        known_mask = ~mask
+        if not np.any(known_mask):
+            # If no known pixels, start from center
+            center_y, center_x = height // 2, width // 2
+            distances = np.sqrt((mask_coords[:, 0] - center_y)**2 + (mask_coords[:, 1] - center_x)**2)
+        else:
+            known_coords = np.column_stack(np.where(known_mask))
+            
+            # Calculate minimum distance to any known pixel
+            distances = []
+            for y, x in mask_coords:
+                min_dist = np.min(np.sqrt((known_coords[:, 0] - y)**2 + (known_coords[:, 1] - x)**2))
+                distances.append(min_dist)
+            distances = np.array(distances)
+        
+        # Sort by distance (nearest first)
+        sorted_indices = np.argsort(distances)
+        ordered_coords = [(i, mask_coords[sorted_indices[i]][0], mask_coords[sorted_indices[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
+
+    def order_flow_based(self, mask_coords, mask):
+        """Order pixels based on S-coordinate flow direction."""
+        if self.gs_coordinate_map is None:
+            return self.order_nearest_first(mask_coords, mask)
+        
+        height, width = mask.shape
+        
+        # Get coordinate maps
+        if 's_x' in self.gs_coordinate_map and 's_y' in self.gs_coordinate_map:
+            s_x = self.gs_coordinate_map['s_x']
+            s_y = self.gs_coordinate_map['s_y']
+        else:
+            return self.order_nearest_first(mask_coords, mask)
+        
+        # Resize if needed
+        if s_x.shape != (height, width):
+            s_x = cv2.resize(s_x, (width, height), interpolation=cv2.INTER_LINEAR)
+            s_y = cv2.resize(s_y, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        # Calculate flow vectors
+        s_x_grad_x = np.gradient(s_x, axis=1)
+        s_x_grad_y = np.gradient(s_x, axis=0)
+        s_y_grad_x = np.gradient(s_y, axis=1)
+        s_y_grad_y = np.gradient(s_y, axis=0)
+        
+        flow_x = s_x_grad_x + s_y_grad_x
+        flow_y = s_x_grad_y + s_y_grad_y
+        flow_magnitude = np.sqrt(flow_x**2 + flow_y**2)
+        
+        # Order by flow magnitude (highest flow first)
+        flow_values = []
+        for y, x in mask_coords:
+            if y < height and x < width:
+                flow_values.append(flow_magnitude[y, x])
+            else:
+                flow_values.append(0)
+        
+        flow_values = np.array(flow_values)
+        sorted_indices = np.argsort(-flow_values)  # Descending order
+        
+        ordered_coords = [(i, mask_coords[sorted_indices[i]][0], mask_coords[sorted_indices[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
+
+    def order_coordinate_based(self, mask_coords, mask):
+        """Order pixels based on coordinate similarity to existing pixels."""
+        if self.gs_coordinate_map is None:
+            return self.order_nearest_first(mask_coords, mask)
+        
+        height, width = mask.shape
+        
+        # Get coordinate maps
+        if 's_x' in self.gs_coordinate_map and 's_y' in self.gs_coordinate_map:
+            s_x = self.gs_coordinate_map['s_x']
+            s_y = self.gs_coordinate_map['s_y']
+        else:
+            return self.order_nearest_first(mask_coords, mask)
+        
+        # Resize if needed
+        if s_x.shape != (height, width):
+            s_x = cv2.resize(s_x, (width, height), interpolation=cv2.INTER_LINEAR)
+            s_y = cv2.resize(s_y, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        # Find known pixels
+        known_mask = ~mask
+        if not np.any(known_mask):
+            return self.order_nearest_first(mask_coords, mask)
+        
+        known_coords = np.column_stack(np.where(known_mask))
+        known_s_coords = np.column_stack([s_x[known_mask], s_y[known_mask]])
+        
+        # Build KD-tree for coordinate lookups
+        from scipy.spatial import cKDTree
+        coord_tree = cKDTree(known_s_coords)
+        
+        # Calculate coordinate distances for mask pixels
+        coord_distances = []
+        for y, x in mask_coords:
+            if y < height and x < width:
+                pixel_s_coord = np.array([s_x[y, x], s_y[y, x]])
+                min_dist, _ = coord_tree.query(pixel_s_coord)
+                coord_distances.append(min_dist)
+            else:
+                coord_distances.append(float('inf'))
+        
+        coord_distances = np.array(coord_distances)
+        sorted_indices = np.argsort(coord_distances)  # Ascending order (closest coordinates first)
+        
+        ordered_coords = [(i, mask_coords[sorted_indices[i]][0], mask_coords[sorted_indices[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
+
+    def order_spiral_out(self, mask_coords, mask):
+        """Order pixels in expanding spiral from center."""
+        height, width = mask.shape
+        center_y, center_x = height // 2, width // 2
+        
+        # Calculate angle and distance from center
+        angles_distances = []
+        for y, x in mask_coords:
+            dy, dx = y - center_y, x - center_x
+            angle = np.arctan2(dy, dx)
+            distance = np.sqrt(dy**2 + dx**2)
+            angles_distances.append((angle, distance))
+        
+        # Sort by distance first, then by angle for spiral effect
+        angles_distances = np.array(angles_distances)
+        distances = angles_distances[:, 1]
+        angles = angles_distances[:, 0]
+        
+        # Create spiral ordering: sort by distance, then by angle within distance bands
+        distance_order = np.argsort(distances)
+        
+        ordered_coords = [(i, mask_coords[distance_order[i]][0], mask_coords[distance_order[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
+
+    def order_distance_weighted(self, mask_coords, mask):
+        """Order pixels using weighted combination of multiple distance metrics."""
+        height, width = mask.shape
+        
+        # Combine multiple ordering methods with weights
+        nearest_order = self.order_nearest_first(mask_coords, mask)
+        flow_order = self.order_flow_based(mask_coords, mask)
+        coord_order = self.order_coordinate_based(mask_coords, mask)
+        
+        # Create weighted scores
+        scores = np.zeros(len(mask_coords))
+        
+        for i, (_, y, x) in enumerate(nearest_order):
+            scores[i] += 0.5 * (len(mask_coords) - i)  # Distance weight
+        
+        for i, (_, y, x) in enumerate(flow_order):
+            scores[i] += 0.3 * (len(mask_coords) - i)  # Flow weight
+        
+        for i, (_, y, x) in enumerate(coord_order):
+            scores[i] += 0.2 * (len(mask_coords) - i)  # Coordinate weight
+        
+        # Sort by combined score
+        sorted_indices = np.argsort(-scores)  # Descending order
+        
+        ordered_coords = [(i, mask_coords[sorted_indices[i]][0], mask_coords[sorted_indices[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
+
+    def divine_single_pixel_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine a single pixel using the current state of the image (including previously divined pixels)."""
+        
+        # Use the appropriate divination method based on current settings
+        method = self.divination_method.get()
+        
+        if method == "gs_enhanced_divine" and self.gs_alignment_data is not None:
+            return self.divine_pixel_gs_enhanced_cascading(pixel_y, pixel_x, current_image, current_mask)
+        elif method == "s_coordinate_flow":
+            return self.divine_pixel_flow_cascading(pixel_y, pixel_x, current_image, current_mask)
+        elif method == "s_coordinate_similarity":
+            return self.divine_pixel_similarity_cascading(pixel_y, pixel_x, current_image, current_mask)
+        elif method == "geometric_extrapolation":
+            return self.divine_pixel_geometric_cascading(pixel_y, pixel_x, current_image, current_mask)
+        else:
+            # Default to combined approach
+            return self.divine_pixel_combined_cascading(pixel_y, pixel_x, current_image, current_mask)
+
+    def divine_pixel_gs_enhanced_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine single pixel using G-S enhanced method with cascading."""
+        if self.gs_coordinate_map is None:
+            return self.divine_pixel_combined_cascading(pixel_y, pixel_x, current_image, current_mask)
+        
+        height, width = current_image.shape[:2]
+        
+        if 'g_theta' in self.gs_coordinate_map and 'g_phi' in self.gs_coordinate_map:
+            s_x = self.gs_coordinate_map['s_x']
+            s_y = self.gs_coordinate_map['s_y']
+            g_theta = self.gs_coordinate_map['g_theta']
+            g_phi = self.gs_coordinate_map['g_phi']
+            
+            # Resize if needed
+            if s_x.shape != (height, width):
+                s_x = cv2.resize(s_x, (width, height), interpolation=cv2.INTER_LINEAR)
+                s_y = cv2.resize(s_y, (width, height), interpolation=cv2.INTER_LINEAR)
+                g_theta = cv2.resize(g_theta, (width, height), interpolation=cv2.INTER_LINEAR)
+                g_phi = cv2.resize(g_phi, (width, height), interpolation=cv2.INTER_LINEAR)
+            
+            return self.gs_coordinate_pixel_synthesis(pixel_y, pixel_x, s_x, s_y, g_theta, g_phi, 
+                                                     current_image, current_mask)
+        
+        return self.divine_pixel_combined_cascading(pixel_y, pixel_x, current_image, current_mask)
+
+    def divine_pixel_flow_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine single pixel using flow analysis with cascading."""
+        if self.gs_coordinate_map is None:
+            return self.divine_pixel_geometric_cascading(pixel_y, pixel_x, current_image, current_mask)
+        
+        height, width = current_image.shape[:2]
+        
+        # Get coordinate maps
+        if 's_x' in self.gs_coordinate_map and 's_y' in self.gs_coordinate_map:
+            s_x = self.gs_coordinate_map['s_x']
+            s_y = self.gs_coordinate_map['s_y']
+        else:
+            y_grid, x_grid = np.mgrid[0:height, 0:width]
+            s_x = (x_grid / width) * 2.0 - 1.0
+            s_y = (y_grid / height) * 2.0 - 1.0
+        
+        # Resize if needed
+        if s_x.shape != (height, width):
+            s_x = cv2.resize(s_x, (width, height), interpolation=cv2.INTER_LINEAR)
+            s_y = cv2.resize(s_y, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        # Calculate flow field
+        s_x_grad_x = np.gradient(s_x, axis=1)
+        s_x_grad_y = np.gradient(s_x, axis=0)
+        s_y_grad_x = np.gradient(s_y, axis=1)
+        s_y_grad_y = np.gradient(s_y, axis=0)
+        
+        flow_x = s_x_grad_x + s_y_grad_x
+        flow_y = s_x_grad_y + s_y_grad_y
+        
+        # Normalize flow vectors
+        flow_magnitude = np.sqrt(flow_x**2 + flow_y**2)
+        flow_magnitude[flow_magnitude == 0] = 1e-6
+        
+        flow_x_norm = flow_x / flow_magnitude
+        flow_y_norm = flow_y / flow_magnitude
+        
+        # Trace flow to find source pixel
+        return self.trace_s_coordinate_flow_source(pixel_x, pixel_y, flow_x_norm, flow_y_norm, 
+                                                  s_x, s_y, current_image, current_mask)
+
+    def divine_pixel_similarity_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine single pixel using similarity matching with cascading."""
+        height, width = current_image.shape[:2]
+        
+        # Get coordinate maps
+        if self.gs_coordinate_map is not None and 's_x' in self.gs_coordinate_map:
+            s_x = self.gs_coordinate_map['s_x']
+            s_y = self.gs_coordinate_map['s_y']
+        else:
+            y_grid, x_grid = np.mgrid[0:height, 0:width]
+            s_x = (x_grid / width) * 2.0 - 1.0
+            s_y = (y_grid / height) * 2.0 - 1.0
+        
+        # Resize if needed
+        if s_x.shape != (height, width):
+            s_x = cv2.resize(s_x, (width, height), interpolation=cv2.INTER_LINEAR)
+            s_y = cv2.resize(s_y, (width, height), interpolation=cv2.INTER_LINEAR)
+        
+        # Find valid pixels (not currently masked)
+        valid_mask = ~current_mask
+        valid_coords = np.column_stack(np.where(valid_mask))
+        
+        if len(valid_coords) == 0:
+            return None
+        
+        # S-coordinates of valid pixels
+        valid_s_coords = np.column_stack([s_x[valid_mask], s_y[valid_mask]])
+        
+        # Build KD-tree
+        try:
+            from scipy.spatial import cKDTree
+            s_coord_tree = cKDTree(valid_s_coords)
+            
+            # Get S-coordinates at pixel location
+            pixel_s_x = s_x[pixel_y, pixel_x]
+            pixel_s_y = s_y[pixel_y, pixel_x]
+            pixel_s_coord = np.array([pixel_s_x, pixel_s_y])
+            
+            # Find closest matches
+            num_neighbors = min(5, len(valid_s_coords))
+            distances, indices = s_coord_tree.query(pixel_s_coord, k=num_neighbors)
+            
+            # Check if closest match is within threshold
+            if distances[0] <= self.divine_similarity_threshold.get():
+                # Weight by similarity
+                weights = 1.0 / (distances + 1e-6)
+                weights = weights / np.sum(weights)
+                
+                # Weighted average
+                divined_pixel = np.zeros(3)
+                for i, idx in enumerate(indices):
+                    pixel_y_valid, pixel_x_valid = valid_coords[idx]
+                    pixel_value = current_image[pixel_y_valid, pixel_x_valid]
+                    divined_pixel += pixel_value * weights[i]
+                
+                return divined_pixel.astype(np.uint8)
+                
+        except Exception as e:
+            if self.debug_mode.get():
+                print(f"   Similarity matching failed: {e}")
+        
+        return None
+
+    def divine_pixel_geometric_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine single pixel using geometric extrapolation with cascading."""
+        height, width = current_image.shape[:2]
+        
+        # Find valid pixels (not currently masked)
+        valid_mask = ~current_mask
+        valid_coords = np.column_stack(np.where(valid_mask))
+        
+        if len(valid_coords) < 3:
+            return None
+        
+        valid_y, valid_x = valid_coords[:, 0], valid_coords[:, 1]
+        
+        # Find closest valid pixels
+        distances = np.sqrt((valid_y - pixel_y)**2 + (valid_x - pixel_x)**2)
+        
+        # Use closest pixels for extrapolation
+        search_radius = self.divine_search_radius.get()
+        close_mask = distances <= search_radius
+        
+        if not np.any(close_mask):
+            # If no pixels within search radius, use closest few
+            num_closest = min(8, len(distances))
+            closest_indices = np.argpartition(distances, num_closest)[:num_closest]
+            close_mask = np.zeros_like(distances, dtype=bool)
+            close_mask[closest_indices] = True
+        
+        close_coords = valid_coords[close_mask]
+        close_distances = distances[close_mask]
+        
+        # Weight by distance
+        weights = 1.0 / (close_distances + 1e-6)
+        weights = weights / np.sum(weights)
+        
+        # Extrapolate pixel value
+        close_pixels = current_image[close_coords[:, 0], close_coords[:, 1]]
+        divined_pixel = np.average(close_pixels, weights=weights, axis=0)
+        
+        return divined_pixel.astype(np.uint8)
+
+    def divine_pixel_combined_cascading(self, pixel_y, pixel_x, current_image, current_mask):
+        """Divine single pixel using combined methods with cascading."""
+        
+        # Try multiple methods in order of preference
+        methods = [
+            self.divine_pixel_similarity_cascading,
+            self.divine_pixel_flow_cascading,
+            self.divine_pixel_geometric_cascading
+        ]
+        
+        for method in methods:
+            try:
+                result = method(pixel_y, pixel_x, current_image, current_mask)
+                if result is not None:
+                    return result
+            except Exception as e:
+                if self.debug_mode.get():
+                    print(f"   Method {method.__name__} failed: {e}")
+                continue
+        
+        return None
+
+    # === EXISTING METHODS (keeping all original functionality) ===
     
     def load_image(self):
         """Load image to divine."""
@@ -488,8 +1069,6 @@ the full G-S compatible divine pixel experience!"""
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load coordinate map: {str(e)}")
 
-    # === G-S COORDINATE GENERATION (Compatible with G-S Stereo Viewer) ===
-    
     def generate_gs_coordinate_maps(self):
         """Generate G-S coordinate maps from alignment data (G-S Stereo Viewer compatible)."""
         if self.gs_alignment_data is None:
@@ -616,10 +1195,10 @@ the full G-S compatible divine pixel experience!"""
             print(f"   S_x range: [{s_x.min():.3f}, {s_x.max():.3f}]")
             print(f"   S_y range: [{s_y.min():.3f}, {s_y.max():.3f}]")
 
-    # === G-S ENHANCED DIVINATION METHODS ===
+    # === MAIN DIVINATION FUNCTION ===
     
     def divine_pixels(self):
-        """Main divine pixels function with G-S enhancement."""
+        """Main divine pixels function with G-S enhancement and cascading support."""
         if self.original_image is None:
             messagebox.showwarning("No Data", "Load an image first")
             return
@@ -627,9 +1206,10 @@ the full G-S compatible divine pixel experience!"""
         try:
             self.divine_button.config(state="disabled")
             self.progress_var.set(0)
+            self.cascade_progress_var.set(0)
             start_time = time.time()
             
-            print("🔮 Starting G-S Compatible Divine Pixel Process...")
+            print("🔮 Starting G-S Compatible Divine Pixel Process with Cascading...")
             
             # Step 1: Generate coordinate map if not available
             if self.gs_coordinate_map is None:
@@ -659,24 +1239,30 @@ the full G-S compatible divine pixel experience!"""
             # Step 4: Apply chosen divination method
             method = self.divination_method.get()
             
-            if method == "s_coordinate_flow":
-                self.divined_image = self.s_coordinate_flow_divination(
-                    self.divined_image, divination_mask)
-            elif method == "s_coordinate_similarity":
-                self.divined_image = self.s_coordinate_similarity_divination(
-                    self.divined_image, divination_mask)
-            elif method == "geometric_extrapolation":
-                self.divined_image = self.geometric_extrapolation_divination(
-                    self.divined_image, divination_mask)
-            elif method == "combined_divine":
-                self.divined_image = self.combined_divine_process(
-                    self.divined_image, divination_mask)
-            elif method == "gs_enhanced_divine":
-                self.divined_image = self.gs_enhanced_divine_process(
-                    self.divined_image, divination_mask)
-            elif method == "omniscient_divine":
-                self.divined_image = self.omniscient_divine_process(
-                    self.divined_image, divination_mask)
+            # Use cascading if enabled or if method is specifically cascading
+            if self.enable_cascading.get() or method == "cascading_divine":
+                print("🌊 Using cascading divination process...")
+                self.divined_image = self.cascading_divine_process(self.divined_image, divination_mask)
+            else:
+                # Use traditional non-cascading methods
+                if method == "s_coordinate_flow":
+                    self.divined_image = self.s_coordinate_flow_divination(
+                        self.divined_image, divination_mask)
+                elif method == "s_coordinate_similarity":
+                    self.divined_image = self.s_coordinate_similarity_divination(
+                        self.divined_image, divination_mask)
+                elif method == "geometric_extrapolation":
+                    self.divined_image = self.geometric_extrapolation_divination(
+                        self.divined_image, divination_mask)
+                elif method == "combined_divine":
+                    self.divined_image = self.combined_divine_process(
+                        self.divined_image, divination_mask)
+                elif method == "gs_enhanced_divine":
+                    self.divined_image = self.gs_enhanced_divine_process(
+                        self.divined_image, divination_mask)
+                elif method == "omniscient_divine":
+                    self.divined_image = self.omniscient_divine_process(
+                        self.divined_image, divination_mask)
             
             self.progress_var.set(80)
             self.root.update_idletasks()
@@ -687,8 +1273,13 @@ the full G-S compatible divine pixel experience!"""
             
             processing_time = time.time() - start_time
             
+            # Update status with cascading info
+            cascade_info = ""
+            if self.enable_cascading.get() or method == "cascading_divine":
+                cascade_info = f" (Cascading: {self.cascading_stats['successful_pixels']}/{self.cascading_stats['total_pixels']} in {self.cascading_stats['cascade_generations']} gen)"
+            
             self.status_label.config(
-                text=f"✅ G-S Divination completed ({processing_time:.2f}s)", 
+                text=f"✅ G-S Divination completed ({processing_time:.2f}s){cascade_info}", 
                 foreground="green"
             )
             
@@ -699,15 +1290,21 @@ the full G-S compatible divine pixel experience!"""
             self.update_statistics()
             
             print(f"🔮 G-S compatible divine pixel process completed in {processing_time:.2f} seconds")
+            if cascade_info:
+                print(f"🌊 Cascading statistics: {self.cascading_stats}")
             self.visualize_results()
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to divine pixels: {str(e)}")
             print(f"Error details: {str(e)}")
+            traceback.print_exc()
         finally:
             self.divine_button.config(state="normal")
             self.progress_var.set(100)
+            self.cascade_progress_var.set(100)
 
+    # === EXISTING DIVINATION METHODS (keep all original functionality) ===
+    
     def gs_enhanced_divine_process(self, image, mask):
         """G-S enhanced divine process using alignment data."""
         if self.gs_alignment_data is None or not self.use_gs_alignment_data.get():
@@ -878,8 +1475,6 @@ the full G-S compatible divine pixel experience!"""
         
         return pixel
 
-    # === CORE DIVINATION METHODS (G-S Compatible) ===
-    
     def create_expanded_canvas(self):
         """Create expanded canvas for divining outside image bounds."""
         if self.original_image is None:
@@ -1292,6 +1887,8 @@ the full G-S compatible divine pixel experience!"""
         # Apply bilateral filter to reduce noise while preserving edges
         return cv2.bilateralFilter(image, 5, 50, 50)
 
+    # === TEST FUNCTIONS ===
+    
     def test_divine_process(self):
         """Test divine process with artificial holes."""
         if self.original_image is None:
@@ -1299,7 +1896,7 @@ the full G-S compatible divine pixel experience!"""
             return
         
         try:
-            print("🧪 Testing G-S divine process...")
+            print("🧪 Testing G-S divine process with cascading...")
             
             # Create test image with artificial holes
             test_image = self.original_image.copy()
@@ -1328,7 +1925,12 @@ the full G-S compatible divine pixel experience!"""
             
             # Apply divine process
             method = self.divination_method.get()
-            if method == "gs_enhanced_divine":
+            
+            # Test cascading if enabled
+            if self.enable_cascading.get() or method == "cascading_divine":
+                print("   Testing cascading divine process...")
+                divined_test = self.cascading_divine_process(test_image, test_mask)
+            elif method == "gs_enhanced_divine":
                 divined_test = self.gs_enhanced_divine_process(test_image, test_mask)
             elif method == "s_coordinate_flow":
                 divined_test = self.s_coordinate_flow_divination(test_image, test_mask)
@@ -1368,7 +1970,12 @@ the full G-S compatible divine pixel experience!"""
             info_text += f"Mask: {np.sum(self.mask_image)} pixels\n"
         if self.gs_coordinate_map is not None:
             source = "G-S Enhanced" if self.gs_coordinate_map.get('alignment_source', False) else "Generated"
-            info_text += f"Coordinates: {source}"
+            info_text += f"Coordinates: {source}\n"
+        
+        # Add cascading info
+        if self.enable_cascading.get():
+            info_text += f"Cascading: {self.cascading_order.get()}\n"
+            info_text += f"Batch Size: {self.cascading_batch_size.get()}"
         
         if info_text:
             ax.text(0.02, 0.98, info_text, transform=ax.transAxes, verticalalignment='top',
@@ -1485,6 +2092,8 @@ the full G-S compatible divine pixel experience!"""
             method_text += f" • G-S Enhanced ({len(self.gs_alignment_data)} alignments)"
         if self.divine_outside_bounds.get():
             method_text += f" • Expanded: {self.edge_extension.get()}px"
+        if self.enable_cascading.get():
+            method_text += f" • Cascading: {self.cascading_order.get()}"
         
         self.fig.suptitle(f"🔮 G-S Compatible Divine Pixel Results - {method_text}", 
                          fontsize=14, weight='bold')
@@ -1527,11 +2136,14 @@ the full G-S compatible divine pixel experience!"""
         method_text = f"Method: {self.divination_method.get()}"
         if self.gs_alignment_data is not None and self.use_gs_alignment_data.get():
             method_text += f"\nG-S Enhanced: {len(self.gs_alignment_data)} alignments"
+        if self.enable_cascading.get():
+            method_text += f"\nCascading: {self.cascading_order.get()}"
+            method_text += f"\nGenerations: {self.cascading_stats.get('cascade_generations', 0)}"
         
         ax3.text(0.02, 0.98, method_text, transform=ax3.transAxes, 
                 verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
         
-        self.fig.suptitle("🧪 G-S Compatible Divine Process Test Results", fontsize=14, weight='bold')
+        self.fig.suptitle("🧪 G-S Compatible Divine Process Test Results with Cascading", fontsize=14, weight='bold')
         self.canvas.draw()
 
     # === STATISTICS AND STATUS ===
@@ -1566,6 +2178,18 @@ the full G-S compatible divine pixel experience!"""
         else:
             stats_text += "G-S Alignments: NONE\n"
         
+        # Cascading statistics
+        if self.enable_cascading.get():
+            stats_text += f"Cascading: ENABLED ({self.cascading_order.get()})\n"
+            if self.cascading_stats['total_pixels'] > 0:
+                success_rate = (self.cascading_stats['successful_pixels'] / 
+                              self.cascading_stats['total_pixels']) * 100
+                stats_text += f"Cascade Success: {success_rate:.1f}%\n"
+                stats_text += f"Generations: {self.cascading_stats['cascade_generations']}\n"
+                stats_text += f"Batch Size: {self.cascading_batch_size.get()}\n"
+        else:
+            stats_text += "Cascading: DISABLED\n"
+        
         stats_text += f"Method: {self.divination_method.get()}\n"
         stats_text += f"Divine Precision: {self.divine_precision.get():.3f}\n"
         stats_text += f"Search Radius: {self.divine_search_radius.get()}px\n"
@@ -1586,7 +2210,7 @@ the full G-S compatible divine pixel experience!"""
                                    foreground="green")
             self.divine_button.config(state="normal")
             self.test_button.config(state="normal")
-            self.status_label.config(text="Ready for G-S divine pixel process", foreground="blue")
+            self.status_label.config(text="Ready for G-S divine pixel process with cascading", foreground="blue")
         else:
             self.image_status.config(text="❌ No image loaded", foreground="red")
         
@@ -1601,7 +2225,7 @@ the full G-S compatible divine pixel experience!"""
     # === EXPORT METHODS ===
     
     def export_result(self):
-        """Export divined image with G-S metadata."""
+        """Export divined image with G-S metadata and cascading info."""
         if self.divined_image is None:
             messagebox.showwarning("No Data", "Perform divination first")
             return
@@ -1617,18 +2241,35 @@ the full G-S compatible divine pixel experience!"""
                 pil_image = Image.fromarray(self.divined_image.astype(np.uint8))
                 pil_image.save(file_path)
                 
-                # Save enhanced metadata including G-S info
+                # Save enhanced metadata including G-S info and cascading
                 metadata_path = file_path.rsplit('.', 1)[0] + "_gs_metadata.txt"
                 with open(metadata_path, 'w') as f:
-                    f.write(f"🔮 G-S Compatible Divine Pixel Tool Export\n")
+                    f.write(f"🔮 G-S Compatible Divine Pixel Tool v1.3 Export\n")
                     f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
                     f.write(f"Author: Angledcrystals\n")
-                    f.write(f"Version: Divine Pixel Tool v1.2 (G-S Compatible)\n\n")
+                    f.write(f"Version: Divine Pixel Tool v1.3 (G-S Compatible with Cascading)\n\n")
                     
                     if self.original_image is not None:
                         f.write(f"Original Image: {self.original_image.shape}\n")
                     f.write(f"Divined Image: {self.divined_image.shape}\n")
                     f.write(f"Divination Method: {self.divination_method.get()}\n")
+                    
+                    # Cascading information
+                    f.write(f"\nCASCADING DIVINATION:\n")
+                    f.write(f"Cascading Enabled: {'YES' if self.enable_cascading.get() else 'NO'}\n")
+                    if self.enable_cascading.get():
+                        f.write(f"Cascading Order: {self.cascading_order.get()}\n")
+                        f.write(f"Batch Size: {self.cascading_batch_size.get()}\n")
+                        f.write(f"Max Distance: {self.cascading_max_distance.get()}\n")
+                        f.write(f"Update Frequency: {self.cascading_update_frequency.get()}\n")
+                        
+                        if self.cascading_stats['total_pixels'] > 0:
+                            success_rate = (self.cascading_stats['successful_pixels'] / 
+                                          self.cascading_stats['total_pixels']) * 100
+                            f.write(f"Total Pixels Processed: {self.cascading_stats['total_pixels']}\n")
+                            f.write(f"Successfully Divined: {self.cascading_stats['successful_pixels']}\n")
+                            f.write(f"Success Rate: {success_rate:.1f}%\n")
+                            f.write(f"Cascade Generations: {self.cascading_stats['cascade_generations']}\n")
                     
                     if self.gs_alignment_data is not None and len(self.gs_alignment_data) > 0:
                         f.write(f"\nG-S ALIGNMENT DATA:\n")
@@ -1679,6 +2320,7 @@ the full G-S compatible divine pixel experience!"""
                     f.write(f"Geometric Extrapolation: {'✅' if self.use_geometric_extrapolation.get() else '❌'}\n")
                     f.write(f"Gradient Synthesis: {'✅' if self.use_gradient_synthesis.get() else '❌'}\n")
                     f.write(f"Noise Reduction: {'✅' if self.noise_reduction.get() else '❌'}\n")
+                    f.write(f"Cascading Divination: {'✅' if self.enable_cascading.get() else '❌'}\n")
                     
                     if self.gs_coordinate_map is not None:
                         f.write(f"\nCOORDINATE MAP INFO:\n")
@@ -1687,13 +2329,13 @@ the full G-S compatible divine pixel experience!"""
                         f.write(f"Available Maps: {list(self.gs_coordinate_map.keys())}\n")
                 
                 messagebox.showinfo("Export Success", 
-                                  f"🔮 G-S divined image saved:\n{file_path}\n\nG-S metadata saved:\n{metadata_path}")
+                                  f"🔮 G-S divined image with cascading saved:\n{file_path}\n\nG-S metadata saved:\n{metadata_path}")
                 
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to save image: {str(e)}")
 
     def export_maps(self):
-        """Export G-S divine maps and coordinate data."""
+        """Export G-S divine maps and coordinate data with cascading info."""
         if self.gs_coordinate_map is None:
             messagebox.showwarning("No Data", "No G-S coordinate maps to export")
             return
@@ -1714,6 +2356,21 @@ the full G-S compatible divine pixel experience!"""
                 export_data['divine_similarity_threshold'] = self.divine_similarity_threshold.get()
                 export_data['expansion_factor'] = self.expansion_factor.get()
                 export_data['edge_extension'] = self.edge_extension.get()
+                
+                # Cascading parameters
+                export_data['enable_cascading'] = self.enable_cascading.get()
+                export_data['cascading_order'] = self.cascading_order.get()
+                export_data['cascading_batch_size'] = self.cascading_batch_size.get()
+                export_data['cascading_max_distance'] = self.cascading_max_distance.get()
+                export_data['cascading_update_frequency'] = self.cascading_update_frequency.get()
+                
+                # Cascading statistics
+                if self.cascading_stats['total_pixels'] > 0:
+                    export_data['cascading_total_pixels'] = self.cascading_stats['total_pixels']
+                    export_data['cascading_successful_pixels'] = self.cascading_stats['successful_pixels']
+                    export_data['cascading_generations'] = self.cascading_stats['cascade_generations']
+                    export_data['cascading_success_rate'] = (self.cascading_stats['successful_pixels'] / 
+                                                            self.cascading_stats['total_pixels']) * 100
                 
                 # G-S alignment data info
                 if self.gs_alignment_data is not None and len(self.gs_alignment_data) > 0:
@@ -1737,23 +2394,24 @@ the full G-S compatible divine pixel experience!"""
                 
                 # Metadata
                 export_data['export_timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
-                export_data['tool_version'] = 'Divine Pixel Tool v1.2 (G-S Compatible)'
+                export_data['tool_version'] = 'Divine Pixel Tool v1.3 (G-S Compatible with Cascading)'
                 export_data['author'] = 'Angledcrystals'
                 
                 np.savez_compressed(file_path, **export_data)
                 
-                messagebox.showinfo("Export Success", f"🗺️ G-S divine maps and data saved:\n{file_path}")
+                messagebox.showinfo("Export Success", f"🗺️ G-S divine maps and cascading data saved:\n{file_path}")
                 
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to save G-S maps: {str(e)}")
 
 def main():
     """Main application entry point."""
-    print("🔮 Starting G-S Compatible Divine Pixel Tool v1.2")
+    print("🔮 Starting G-S Compatible Divine Pixel Tool v1.3 with Cascading")
     print("Advanced Image Pixel Divination System with G-S Stereo Viewer Compatibility")
+    print("Now featuring Cascading Divination for Sequential Pixel Processing")
     print("Author: Angledcrystals")
-    print("Date: 2025-06-09 11:37:26 UTC")
-    print("=" * 70)
+    print("Date: 2025-06-09 12:29:17 UTC")
+    print("=" * 80)
     
     try:
         root = tk.Tk()
@@ -1767,8 +2425,8 @@ def main():
         y = (root.winfo_screenheight() // 2) - (height // 2)
         root.geometry(f"{width}x{height}+{x}+{y}")
         
-        print("🔮 G-S Compatible Divine Pixel Tool launched successfully!")
-        print("Ready for G-S enhanced pixel divination...")
+        print("🔮 G-S Compatible Divine Pixel Tool with Cascading launched successfully!")
+        print("Ready for G-S enhanced cascading pixel divination...")
         print("\n📊 G-S Compatibility Features:")
         print("   • Full compatibility with G-S Stereo Viewer alignment format")
         print("   • S_x, S_y, G_theta, G_phi coordinate support")  
@@ -1776,6 +2434,18 @@ def main():
         print("   • G-S enhanced divination methods")
         print("   • Complete metadata export with G-S alignment info")
         print("   • Identical coordinate generation methods as G-S Stereo Viewer")
+        print("\n🌊 NEW Cascading Divination Features:")
+        print("   • Sequential pixel processing using previously calculated pixels")
+        print("   • Multiple cascading orders: nearest-first, flow-based, coordinate-based")
+        print("   • Configurable batch processing and update frequencies")
+        print("   • Real-time cascading progress visualization")
+        print("   • Enhanced continuity and pattern propagation")
+        print("   • Spiral-out and distance-weighted ordering algorithms")
+        print("\n🚀 Cascading Benefits:")
+        print("   • Improved texture continuity in divined regions")
+        print("   • Reduced artifacts and smoother transitions")
+        print("   • Better preservation of patterns and structures")
+        print("   • Adaptive processing where each pixel builds on previous results")
         
         # Add exception handling for better error reporting
         def show_error(exc_type, exc_value, exc_traceback):
@@ -1793,7 +2463,7 @@ def main():
         traceback.print_exc()
         messagebox.showerror("Startup Error", f"Failed to start application: {str(e)}")
     
-    print("🔮 G-S Compatible Divine Pixel Tool closed")
+    print("🔮 G-S Compatible Divine Pixel Tool with Cascading closed")
 
 if __name__ == "__main__":
     main()
