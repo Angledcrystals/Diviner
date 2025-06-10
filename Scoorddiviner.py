@@ -74,6 +74,12 @@ class GSCompatibleDivinePixelTool:
         self.cascading_update_frequency = tk.StringVar(value="immediate")
         self.show_cascading_progress = tk.BooleanVar(value=True)
         
+        # Off-screen rendering parameters
+        self.offscreen_gradient_strength = tk.DoubleVar(value=0.15)
+        self.offscreen_decay_rate = tk.DoubleVar(value=0.1)
+        self.offscreen_continuity = tk.DoubleVar(value=0.7)
+        self.edge_extrapolation_method = tk.StringVar(value="reflection")
+        
         # Processing options
         self.noise_reduction = tk.BooleanVar(value=True)
         self.preserve_structures = tk.BooleanVar(value=True)
@@ -221,6 +227,26 @@ class GSCompatibleDivinePixelTool:
         
         ttk.Checkbutton(cascade_frame, text="📊 Show Cascading Progress", 
                        variable=self.show_cascading_progress).pack(anchor=tk.W, pady=2)
+        
+        # Off-Screen Rendering Options
+        offscreen_frame = ttk.LabelFrame(parent, text="Off-Screen Rendering Options", padding=10)
+        offscreen_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(offscreen_frame, text="Gradient Strength:").pack(anchor=tk.W)
+        ttk.Scale(offscreen_frame, from_=0.05, to=0.5, variable=self.offscreen_gradient_strength, 
+                 orient=tk.HORIZONTAL).pack(fill=tk.X, pady=2)
+
+        ttk.Label(offscreen_frame, text="Distance Decay Rate:").pack(anchor=tk.W) 
+        ttk.Scale(offscreen_frame, from_=0.01, to=0.3, variable=self.offscreen_decay_rate,
+                 orient=tk.HORIZONTAL).pack(fill=tk.X, pady=2)
+
+        ttk.Label(offscreen_frame, text="Edge Continuity Factor:").pack(anchor=tk.W)
+        ttk.Scale(offscreen_frame, from_=0.1, to=1.0, variable=self.offscreen_continuity,
+                 orient=tk.HORIZONTAL).pack(fill=tk.X, pady=2)
+
+        ttk.Label(offscreen_frame, text="Edge Extrapolation Method:").pack(anchor=tk.W)
+        ttk.Combobox(offscreen_frame, textvariable=self.edge_extrapolation_method,
+                    values=["reflection", "gradient", "periodic", "hybrid"]).pack(fill=tk.X, pady=2)
         
         # Divination Method Section
         method_frame = ttk.LabelFrame(parent, text="Step 3: Divination Method", padding=10)
@@ -444,6 +470,397 @@ the enhanced G-S compatible cascading divine pixel experience!"""
         ax.set_title("G-S Compatible Divine Pixel Tool with Cascading", fontsize=16, weight='bold')
         
         self.canvas.draw()
+
+    # === NEW METHODS FOR IMPROVED OFF-SCREEN RENDERING ===
+    
+    def enhance_internal_blank_coordinates(self, s_x, s_y, mask):
+        """Enhance S-coordinates for internal blank regions."""
+        height, width = mask.shape
+        enhanced_s_x = s_x.copy()
+        enhanced_s_y = s_y.copy()
+        
+        # Identify internal blank regions
+        internal_blanks = np.zeros_like(mask)
+        for y in range(1, height-1):
+            for x in range(1, width-1):
+                if mask[y, x]:  # If this is a blank pixel
+                    # Check if it's surrounded by non-blank pixels (internal)
+                    neighbors = np.sum(mask[y-1:y+2, x-1:x+2])
+                    if neighbors < 9:  # Not all neighbors are blank
+                        internal_blanks[y, x] = True
+        
+        # Create interpolated coordinates across internal blank regions
+        if np.any(internal_blanks):
+            # Use griddata to interpolate across blank regions
+            valid_mask = ~mask
+            
+            # Get valid coordinate points
+            valid_y, valid_x = np.where(valid_mask)
+            
+            if len(valid_y) > 0:  # Make sure we have valid points
+                # Interpolate S_x coordinates
+                s_x_valid = s_x[valid_mask]
+                s_x_interp = griddata(
+                    np.column_stack([valid_y, valid_x]), 
+                    s_x_valid, 
+                    np.column_stack(np.where(internal_blanks)), 
+                    method='linear',  # Use linear instead of cubic for better stability
+                    fill_value=None
+                )
+                
+                # Interpolate S_y coordinates
+                s_y_valid = s_y[valid_mask]
+                s_y_interp = griddata(
+                    np.column_stack([valid_y, valid_x]), 
+                    s_y_valid, 
+                    np.column_stack(np.where(internal_blanks)), 
+                    method='linear', 
+                    fill_value=None
+                )
+                
+                # Handle potential NaN values from interpolation
+                if s_x_interp is not None and not np.isnan(s_x_interp).all():
+                    s_x_interp = np.nan_to_num(s_x_interp, nan=0.0)
+                    enhanced_s_x[internal_blanks] = s_x_interp
+                
+                if s_y_interp is not None and not np.isnan(s_y_interp).all():
+                    s_y_interp = np.nan_to_num(s_y_interp, nan=0.0)
+                    enhanced_s_y[internal_blanks] = s_y_interp
+                
+                if self.debug_mode.get():
+                    print(f"Enhanced S-coordinates for {np.sum(internal_blanks)} internal blank pixels")
+        
+        return enhanced_s_x, enhanced_s_y
+
+    def create_enhanced_expanded_canvas(self):
+        """Create expanded canvas with boundary extrapolation."""
+        height, width = self.original_image.shape[:2]
+        expansion = self.edge_extension.get()
+        
+        # Create larger canvas
+        new_height = height + 2 * expansion
+        new_width = width + 2 * expansion
+        
+        expanded_image = np.zeros((new_height, new_width, 3), dtype=np.uint8)
+        
+        # Place original image in center
+        expanded_image[expansion:expansion+height, expansion:expansion+width] = self.original_image
+        
+        # Get extrapolation method
+        method = self.edge_extrapolation_method.get()
+        
+        if method == "reflection" or method == "hybrid":
+            # Pre-fill boundaries with edge reflection for better starting data
+            # Top edge
+            if expansion > 0 and height > expansion:
+                expanded_image[0:expansion, expansion:expansion+width] = np.flip(
+                    self.original_image[0:expansion, :], axis=0)
+                # Bottom edge
+                expanded_image[expansion+height:, expansion:expansion+width] = np.flip(
+                    self.original_image[height-expansion:, :], axis=0)
+            
+            if expansion > 0 and width > expansion:
+                # Left edge
+                expanded_image[expansion:expansion+height, 0:expansion] = np.flip(
+                    self.original_image[:, 0:expansion], axis=1)
+                # Right edge
+                expanded_image[expansion:expansion+height, expansion+width:] = np.flip(
+                    self.original_image[:, width-expansion:], axis=1)
+            
+            # Corners (use diagonal reflections)
+            if expansion > 0 and height > expansion and width > expansion:
+                # Top-left
+                expanded_image[0:expansion, 0:expansion] = np.flip(
+                    self.original_image[0:expansion, 0:expansion], axis=(0,1))
+                # Top-right
+                expanded_image[0:expansion, expansion+width:] = np.flip(
+                    self.original_image[0:expansion, width-expansion:], axis=(0,1))
+                # Bottom-left
+                expanded_image[expansion+height:, 0:expansion] = np.flip(
+                    self.original_image[height-expansion:, 0:expansion], axis=(0,1))
+                # Bottom-right
+                expanded_image[expansion+height:, expansion+width:] = np.flip(
+                    self.original_image[height-expansion:, width-expansion:], axis=(0,1))
+        
+        elif method == "periodic":
+            # Use periodic repetition
+            for y in range(expansion):
+                for x in range(new_width):
+                    # Get source coordinates with periodic wrapping
+                    src_x = (x - expansion) % width
+                    # Top edge
+                    expanded_image[y, x] = self.original_image[0, src_x]
+                    # Bottom edge
+                    expanded_image[y + expansion + height, x] = self.original_image[height-1, src_x]
+            
+            for x in range(expansion):
+                for y in range(new_height):
+                    # Get source coordinates with periodic wrapping
+                    src_y = (y - expansion) % height
+                    # Left edge
+                    expanded_image[y, x] = self.original_image[src_y, 0]
+                    # Right edge
+                    expanded_image[y, x + expansion + width] = self.original_image[src_y, width-1]
+        
+        if self.debug_mode.get():
+            print(f"🚀 Created enhanced expanded canvas: {expanded_image.shape} using {method} method")
+        
+        return expanded_image
+
+    def generate_extended_coordinate_map(self):
+        """Generate extended S-coordinate map for off-screen divination."""
+        if self.original_image is None:
+            return
+            
+        height, width = self.original_image.shape[:2]
+        expansion = self.edge_extension.get()
+        new_height, new_width = height + 2 * expansion, width + 2 * expansion
+        
+        # Generate extended coordinate grids
+        y_grid, x_grid = np.mgrid[0:new_height, 0:new_width]
+        
+        # Create extended S-coordinates with proper extrapolation
+        if self.gs_coordinate_map is not None and 's_x' in self.gs_coordinate_map:
+            # Get original S-coordinates
+            orig_s_x = self.gs_coordinate_map['s_x']
+            orig_s_y = self.gs_coordinate_map['s_y']
+            
+            # Determine S-coordinate range
+            s_x_min, s_x_max = np.min(orig_s_x), np.max(orig_s_x)
+            s_y_min, s_y_max = np.min(orig_s_y), np.max(orig_s_y)
+            
+            # Calculate S-coordinate step sizes
+            s_x_step = (s_x_max - s_x_min) / width
+            s_y_step = (s_y_max - s_y_min) / height
+            
+            # Create extended S-coordinates with continuous extrapolation
+            s_x_extended = np.zeros((new_height, new_width))
+            s_y_extended = np.zeros((new_height, new_width))
+            
+            # Fill center with original S-coordinates
+            s_x_extended[expansion:expansion+height, expansion:expansion+width] = orig_s_x
+            s_y_extended[expansion:expansion+height, expansion:expansion+width] = orig_s_y
+            
+            # Extrapolate S-coordinates outside the original bounds
+            # Left side
+            for i in range(expansion):
+                s_x_extended[:, expansion-1-i] = s_x_extended[:, expansion] - (i+1) * s_x_step
+            # Right side
+            for i in range(expansion):
+                s_x_extended[:, expansion+width+i] = s_x_extended[:, expansion+width-1] + (i+1) * s_x_step
+            # Top side
+            for i in range(expansion):
+                s_y_extended[expansion-1-i, :] = s_y_extended[expansion, :] - (i+1) * s_y_step
+            # Bottom side
+            for i in range(expansion):
+                s_y_extended[expansion+height+i, :] = s_y_extended[expansion+height-1, :] + (i+1) * s_y_step
+            
+            # Create extended G-theta and G-phi if available
+            if 'g_theta' in self.gs_coordinate_map and 'g_phi' in self.gs_coordinate_map:
+                g_theta = self.gs_coordinate_map['g_theta']
+                g_phi = self.gs_coordinate_map['g_phi']
+                
+                # Create RectBivariateSpline for smooth extrapolation
+                y_indices = np.arange(height)
+                x_indices = np.arange(width)
+                theta_spline = RectBivariateSpline(y_indices, x_indices, g_theta)
+                phi_spline = RectBivariateSpline(y_indices, x_indices, g_phi)
+                
+                # Create extended arrays
+                g_theta_extended = np.zeros((new_height, new_width))
+                g_phi_extended = np.zeros((new_height, new_width))
+                
+                # Fill with extrapolated values
+                for y in range(new_height):
+                    for x in range(new_width):
+                        # Convert to original coordinate system
+                        orig_y = y - expansion
+                        orig_x = x - expansion
+                        
+                        # Clamp to slightly beyond original bounds for extrapolation
+                        orig_y = max(-height/4, min(height + height/4, orig_y))
+                        orig_x = max(-width/4, min(width + width/4, orig_x))
+                        
+                        # Extrapolate G-coordinates
+                        g_theta_extended[y, x] = theta_spline(orig_y, orig_x, grid=False)
+                        g_phi_extended[y, x] = phi_spline(orig_y, orig_x, grid=False)
+                
+                # Add to coordinate map
+                self.gs_coordinate_map['extended_g_theta'] = g_theta_extended
+                self.gs_coordinate_map['extended_g_phi'] = g_phi_extended
+            
+            # Store extended coordinates
+            self.gs_coordinate_map['extended_s_x'] = s_x_extended
+            self.gs_coordinate_map['extended_s_y'] = s_y_extended
+            self.gs_coordinate_map['extended_x_grid'] = x_grid
+            self.gs_coordinate_map['extended_y_grid'] = y_grid
+            
+            if self.debug_mode.get():
+                print(f"🗺️ Generated extended coordinate map for off-screen divination")
+                print(f"   Extended S_x range: [{s_x_extended.min():.3f}, {s_x_extended.max():.3f}]")
+                print(f"   Extended S_y range: [{s_y_extended.min():.3f}, {s_y_extended.max():.3f}]")
+
+    def divine_offscreen_pixels_with_gradients(self, image, mask):
+        """Divine off-screen pixels using gradient-aware methods."""
+        result = image.copy()
+        height, width = result.shape[:2]
+        
+        # Get original image dimensions
+        orig_height, orig_width = self.original_image.shape[:2]
+        expansion = self.edge_extension.get()
+        
+        # Identify off-screen pixels
+        off_screen_mask = np.zeros((height, width), dtype=bool)
+        off_screen_mask[0:expansion, :] = True  # Top
+        off_screen_mask[expansion+orig_height:, :] = True  # Bottom
+        off_screen_mask[:, 0:expansion] = True  # Left
+        off_screen_mask[:, expansion+orig_width:] = True  # Right
+        
+        # Combined mask (off-screen AND needs divination)
+        off_screen_divine_mask = off_screen_mask & mask
+        
+        # Calculate edge gradients for better extrapolation
+        edge_pixels = np.zeros_like(mask)
+        edge_pixels[expansion-1:expansion+1, :] = True  # Top edge
+        edge_pixels[expansion+orig_height-1:expansion+orig_height+1, :] = True  # Bottom edge
+        edge_pixels[:, expansion-1:expansion+1] = True  # Left edge
+        edge_pixels[:, expansion+orig_width-1:expansion+orig_width+1] = True  # Right edge
+        
+        # Calculate gradients only where we have valid pixels
+        valid_edges = edge_pixels & ~mask
+        if np.any(valid_edges):
+            edge_image = result.copy()
+            edge_image[~valid_edges] = 0
+            
+            # Calculate edge gradients
+            edge_gray = cv2.cvtColor(edge_image, cv2.COLOR_RGB2GRAY)
+            grad_x = cv2.Sobel(edge_gray, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(edge_gray, cv2.CV_64F, 0, 1, ksize=3)
+            
+            # Process off-screen pixels with gradient awareness
+            mask_coords = np.column_stack(np.where(off_screen_divine_mask))
+            
+            for mask_y, mask_x in mask_coords:
+                # Find nearest edge pixel
+                dist_to_top = mask_y - expansion if mask_y >= expansion else float('inf')
+                dist_to_bottom = mask_y - (expansion+orig_height-1) if mask_y >= expansion+orig_height else float('inf')
+                dist_to_left = mask_x - expansion if mask_x >= expansion else float('inf')
+                dist_to_right = mask_x - (expansion+orig_width-1) if mask_x >= expansion+orig_width else float('inf')
+                
+                # Find closest edge
+                closest_edge = min([(abs(dist_to_top), "top"), 
+                                  (abs(dist_to_bottom), "bottom"),
+                                  (abs(dist_to_left), "left"), 
+                                  (abs(dist_to_right), "right")], 
+                                 key=lambda x: x[0])
+                
+                # Get reference point on edge
+                ref_y, ref_x = mask_y, mask_x
+                if closest_edge[1] == "top":
+                    ref_y = expansion
+                elif closest_edge[1] == "bottom":
+                    ref_y = expansion + orig_height - 1
+                elif closest_edge[1] == "left":
+                    ref_x = expansion
+                elif closest_edge[1] == "right":
+                    ref_x = expansion + orig_width - 1
+                
+                # Calculate distance from edge
+                distance = np.sqrt((mask_y - ref_y)**2 + (mask_x - ref_x)**2)
+                
+                # If we have a valid reference pixel
+                if not mask[ref_y, ref_x]:
+                    # Get gradient at reference point
+                    grad_x_ref = grad_x[ref_y, ref_x]
+                    grad_y_ref = grad_y[ref_y, ref_x]
+                    
+                    # Get reference pixel value
+                    ref_pixel = result[ref_y, ref_x]
+                    
+                    # Calculate gradient-based modification factor
+                    # The further away, the more gradient influence decreases
+                    decay_factor = 1.0 / (1.0 + self.offscreen_decay_rate.get() * distance)
+                    
+                    # Calculate change in position
+                    dy = mask_y - ref_y
+                    dx = mask_x - ref_x
+                    
+                    # Apply gradient-based extrapolation with adaptive weight
+                    gradient_influence = np.array([
+                        grad_x_ref * dx + grad_y_ref * dy,
+                        grad_x_ref * dx + grad_y_ref * dy,
+                        grad_x_ref * dx + grad_y_ref * dy
+                    ]) * decay_factor
+                    
+                    # Create new pixel value with gradient influence
+                    new_pixel = ref_pixel + gradient_influence * self.offscreen_gradient_strength.get()
+                    new_pixel = np.clip(new_pixel, 0, 255).astype(np.uint8)
+                    
+                    result[mask_y, mask_x] = new_pixel
+        
+        # For remaining off-screen pixels, apply standard divination
+        remaining_mask = off_screen_divine_mask & np.all(result == 0, axis=2)
+        if np.any(remaining_mask):
+            if self.enable_cascading.get():
+                # Use specialized ordering for off-screen pixels
+                ordered_coords = self.order_offscreen_pixels_for_cascading(
+                    remaining_mask, expansion, orig_height, orig_width)
+                
+                # Process in layers from edge outward
+                self.cascading_stats['total_pixels'] = len(ordered_coords)
+                self.cascading_stats['processed_pixels'] = 0
+                self.cascading_stats['successful_pixels'] = 0
+                
+                for i, mask_y, mask_x in ordered_coords:
+                    if not remaining_mask[mask_y, mask_x]:
+                        continue
+                        
+                    divined_pixel = self.divine_single_pixel_cascading(
+                        mask_y, mask_x, result, remaining_mask)
+                    
+                    if divined_pixel is not None:
+                        result[mask_y, mask_x] = divined_pixel
+                        remaining_mask[mask_y, mask_x] = False
+                        self.cascading_stats['successful_pixels'] += 1
+                    
+                    self.cascading_stats['processed_pixels'] += 1
+            else:
+                result = self.combined_divine_process(result, remaining_mask)
+        
+        return result
+
+    def order_offscreen_pixels_for_cascading(self, mask, expansion, orig_height, orig_width):
+        """Order off-screen pixels optimally for cascading."""
+        mask_coords = np.column_stack(np.where(mask))
+        if len(mask_coords) == 0:
+            return []
+        
+        # Identify edge boundaries
+        top_edge = expansion
+        bottom_edge = expansion + orig_height - 1
+        left_edge = expansion
+        right_edge = expansion + orig_width - 1
+        
+        # Calculate distance from each pixel to the nearest edge
+        distances = []
+        for y, x in mask_coords:
+            dist_to_top = abs(y - top_edge) if y < top_edge else float('inf')
+            dist_to_bottom = abs(y - bottom_edge) if y > bottom_edge else float('inf')
+            dist_to_left = abs(x - left_edge) if x < left_edge else float('inf')
+            dist_to_right = abs(x - right_edge) if x > right_edge else float('inf')
+            
+            # Use minimum distance to any edge
+            min_dist = min(dist_to_top, dist_to_bottom, dist_to_left, dist_to_right)
+            distances.append(min_dist)
+        
+        # Sort by distance from edge (closest first)
+        distances = np.array(distances)
+        sorted_indices = np.argsort(distances)
+        
+        ordered_coords = [(i, mask_coords[sorted_indices[i]][0], mask_coords[sorted_indices[i]][1]) 
+                         for i in range(len(mask_coords))]
+        
+        return ordered_coords
 
     # === CASCADING DIVINATION CORE FUNCTIONS ===
     
@@ -1233,8 +1650,45 @@ the enhanced G-S compatible cascading divine pixel experience!"""
             # Step 3: Create divination mask
             divination_mask = self.create_divination_mask()
             
+            # Enhance coordinates for internal blank regions
+            if self.gs_coordinate_map is not None:
+                try:
+                    # Get coordinate maps
+                    s_x = self.gs_coordinate_map['s_x'] 
+                    s_y = self.gs_coordinate_map['s_y']
+                    
+                    # Check dimensions match
+                    if s_x.shape == divination_mask.shape and s_y.shape == divination_mask.shape:
+                        # Enhance coordinates for internal blank regions
+                        enhanced_s_x, enhanced_s_y = self.enhance_internal_blank_coordinates(
+                            s_x, s_y, divination_mask)
+                        
+                        # Store enhanced coordinates 
+                        self.gs_coordinate_map['enhanced_s_x'] = enhanced_s_x
+                        self.gs_coordinate_map['enhanced_s_y'] = enhanced_s_y
+                        
+                        if self.debug_mode.get():
+                            print("🗺️ Enhanced S-coordinates for internal blank regions")
+                except Exception as e:
+                    if self.debug_mode.get():
+                        print(f"Warning: Could not enhance coordinates: {e}")
+            
             self.progress_var.set(60)
             self.root.update_idletasks()
+            
+            # Special handling for off-screen pixels if enabled
+            if self.divine_outside_bounds.get():
+                try:
+                    # Use the gradient-aware off-screen processing first
+                    self.divined_image = self.divine_offscreen_pixels_with_gradients(
+                        self.divined_image, divination_mask)
+                    # Update mask for remaining pixels
+                    divination_mask = np.all(self.divined_image == 0, axis=2) & divination_mask
+                    if self.debug_mode.get():
+                        print("🚀 Applied gradient-aware off-screen processing")
+                except Exception as e:
+                    if self.debug_mode.get():
+                        print(f"Warning: Could not process off-screen pixels with gradients: {e}")
             
             # Step 4: Apply chosen divination method
             method = self.divination_method.get()
